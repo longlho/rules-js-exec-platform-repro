@@ -9,7 +9,7 @@ index c41ee83d..9ab9c545 100644
  load(":starlark_codegen_utils.bzl", "starlark_codegen_utils")
  load(":utils.bzl", "utils")
  
-@@ -990,37 +990,12 @@ def _to_deps_attr(deps, deps_oss, deps_cpus):
+@@ -990,37 +990,14 @@ def _to_deps_attr(deps, deps_oss, deps_cpus):
 -    # Must split the deps into groups that share the same constraints based on
 -    # cpu and os conditions.
 -    # A bazel select() can only have one truthy condition so constraints such as:
@@ -17,7 +17,9 @@ index c41ee83d..9ab9c545 100644
 -    # can not be expressed in a single select().
 +    # Native optional dependencies may be loaded by target-configuration files
 +    # during an exec-configuration action, so package stores must include every
-+    # lockfile optional package that was fetched.
++    # lockfile optional package that was fetched. This vendored patch is broader
++    # than the ideal upstream fix: upstream should keep target-platform selects
++    # for normal package stores and add an exec-aware store for JS tools.
      unconstrained = {}
 -    constrained = {
 -        "os": {},
