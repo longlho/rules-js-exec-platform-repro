@@ -30,5 +30,5 @@ jobs:
       - name: Native target succeeds
         run: bazelisk build //:uses_rolldown
 
-      - name: Cross target should fail because rules_js filters by target platform
+      - name: Cross target succeeds with patched rules_js
         run: bazelisk build //:uses_rolldown --platforms=//:linux_arm64
