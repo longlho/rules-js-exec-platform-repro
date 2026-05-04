@@ -1,0 +1,22 @@
+diff --git a/lib/private/run_binary.bzl b/lib/private/run_binary.bzl
+index 9d72e0d..29b7544 100644
+--- a/lib/private/run_binary.bzl
++++ b/lib/private/run_binary.bzl
+@@ -59,12 +59,17 @@ ERROR: target {target} is not configured to produce any outputs.
+         envs["BAZEL_VOLATILE_STATUS_FILE"] = stamp.volatile_status_file.path
+         can_path_map = False
+     else:
+         inputs = ctx.files.srcs
++    inputs = depset(
++        direct = inputs,
++        transitive = [ctx.attr.tool[DefaultInfo].default_runfiles.files],
++    )
+ 
+     ctx.actions.run(
+         outputs = outputs,
+         inputs = inputs,
+         executable = ctx.executable.tool,
++        tools = [ctx.attr.tool[DefaultInfo].files_to_run],
+         arguments = [args],
+         resource_set = resource_set(ctx.attr),
+         mnemonic = ctx.attr.mnemonic if ctx.attr.mnemonic else None,

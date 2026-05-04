@@ -1,0 +1,76 @@
+diff --git a/js/private/js_binary.sh.tpl b/js/private/js_binary.sh.tpl
+index f0e87a6f..cfdb4a51 100755
+--- a/js/private/js_binary.sh.tpl
++++ b/js/private/js_binary.sh.tpl
+@@ -99,9 +99,13 @@ function logf_debug {
+ }
+ 
+ function resolve_execroot_bin_path {
+     local short_path="$1"
++    local bindir="${BAZEL_BINDIR:-$JS_BINARY__BINDIR}"
++    if [ "${JS_BINARY__USE_EXECROOT_ENTRY_POINT:-}" ]; then
++        bindir="$JS_BINARY__BINDIR"
++    fi
+     if [[ "$short_path" == ../* ]]; then
+-        echo "$JS_BINARY__EXECROOT/${BAZEL_BINDIR:-$JS_BINARY__BINDIR}/external/${short_path:3}"
++        echo "$JS_BINARY__EXECROOT/$bindir/external/${short_path:3}"
+     else
+-        echo "$JS_BINARY__EXECROOT/${BAZEL_BINDIR:-$JS_BINARY__BINDIR}/$short_path"
++        echo "$JS_BINARY__EXECROOT/$bindir/$short_path"
+     fi
+ }
+diff --git a/npm/private/npm_import.bzl b/npm/private/npm_import.bzl
+index c41ee83d..9ab9c545 100644
+--- a/npm/private/npm_import.bzl
++++ b/npm/private/npm_import.bzl
+@@ -26,7 +26,6 @@ load(":npm_link_package_store.bzl", "npm_link_package_store")
+ load(":npm_package_internal.bzl", "npm_package_internal")
+ load(":npm_package_store_internal.bzl", "npm_package_store_internal")
+-load(":pnpm.bzl", "pnpm")
+ load(":starlark_codegen_utils.bzl", "starlark_codegen_utils")
+ load(":utils.bzl", "utils")
+ 
+@@ -990,37 +990,12 @@ def _to_deps_attr(deps, deps_oss, deps_cpus):
+-    # Must split the deps into groups that share the same constraints based on
+-    # cpu and os conditions.
+-    # A bazel select() can only have one truthy condition so constraints such as:
+-    #    ['windows', 'windows && x86_64']
+-    # can not be expressed in a single select().
++    # Native optional dependencies may be loaded by target-configuration files
++    # during an exec-configuration action, so package stores must include every
++    # lockfile optional package that was fetched.
+     unconstrained = {}
+-    constrained = {
+-        "os": {},
+-        "cpu": {},
+-        "both": {},
+-    }
+-
+     for k, v in deps.items():
+-        if k in deps_oss and k in deps_cpus:
+-            for condition in pnpm.to_bazel_os_cpu_constraints(deps_oss[k], deps_cpus[k]):
+-                if condition not in constrained["both"]:
+-                    constrained["both"][condition] = {}
+-                constrained["both"][condition][k] = v
+-        elif k in deps_oss:
+-            for condition in pnpm.to_bazel_os_constraints(deps_oss[k]):
+-                if condition not in constrained["os"]:
+-                    constrained["os"][condition] = {}
+-                constrained["os"][condition][k] = v
+-        elif k in deps_cpus:
+-            for condition in pnpm.to_bazel_cpu_constraints(deps_cpus[k]):
+-                if condition not in constrained["cpu"]:
+-                    constrained["cpu"][condition] = {}
+-                constrained["cpu"][condition][k] = v
+-        else:
+-            unconstrained[k] = v
++        unconstrained[k] = v
+ 
+-    return starlark_codegen_utils.to_conditional_dict_attr(
++    return starlark_codegen_utils.to_dict_attr(
+         unconstrained,
+-        [v for v in constrained.values() if len(v) > 0],
+-        quote_key = False,
+         indent_count = 2,
++        quote_key = False,
+     )
