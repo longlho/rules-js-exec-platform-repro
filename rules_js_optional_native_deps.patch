@@ -1,57 +1,129 @@
 diff --git a/npm/private/npm_import.bzl b/npm/private/npm_import.bzl
-index c41ee83d..9ab9c545 100644
+index fae2a54..a1e80e7 100644
 --- a/npm/private/npm_import.bzl
 +++ b/npm/private/npm_import.bzl
-@@ -26,7 +26,6 @@ load(":npm_link_package_store.bzl", "npm_link_package_store")
- load(":npm_package_internal.bzl", "npm_package_internal")
- load(":npm_package_store_internal.bzl", "npm_package_store_internal")
--load(":pnpm.bzl", "pnpm")
- load(":starlark_codegen_utils.bzl", "starlark_codegen_utils")
- load(":utils.bzl", "utils")
+@@ -67,6 +67,7 @@ def npm_imported_package_store_internal():
+         version = VERSION,
+         root_package = _ROOT_PACKAGE,
+         deps = {deps},
++        exec_deps = {exec_deps},
+         ref_deps = {ref_deps},
+         lc_deps = {lc_deps},
+         has_lifecycle_build_target = {has_lifecycle_build_target},
+@@ -90,6 +91,7 @@ def npm_imported_package_store_internal(
+         version,
+         root_package,
+         deps,
++        exec_deps,
+         ref_deps,
+         lc_deps,
+         has_lifecycle_build_target,
+@@ -149,6 +151,7 @@ def npm_imported_package_store_internal(
+         package = package,
+         version = version,
+         deps = deps,
++        exec_deps = exec_deps,
+         visibility = ["//visibility:public"],
+         tags = ["manual"],
+         exclude_package_contents = expanded_exclude_patterns,
+@@ -856,6 +859,7 @@ def _npm_import_links_rule_impl(rctx):
  
-@@ -990,37 +990,14 @@ def _to_deps_attr(deps, deps_oss, deps_cpus):
--    # Must split the deps into groups that share the same constraints based on
--    # cpu and os conditions.
--    # A bazel select() can only have one truthy condition so constraints such as:
--    #    ['windows', 'windows && x86_64']
--    # can not be expressed in a single select().
-+    # Native optional dependencies may be loaded by target-configuration files
-+    # during an exec-configuration action, so package stores must include every
-+    # lockfile optional package that was fetched. This vendored patch is broader
-+    # than the ideal upstream fix: upstream should keep target-platform selects
-+    # for normal package stores and add an exec-aware store for JS tools.
+     npm_link_pkg_bzl_vars = dict(
+         deps = _to_deps_attr(deps, deps_oss, deps_cpus),
++        exec_deps = _to_exec_deps_attr(deps, deps_oss, deps_cpus),
+         npm_package_target = npm_package_target,
+         lc_deps = _to_deps_attr(lc_deps, deps_oss, deps_cpus) if has_lifecycle_build_target else "{}",
+         has_lifecycle_build_target = has_lifecycle_build_target,
+@@ -904,6 +908,27 @@ def _to_deps_attr(deps, deps_oss, deps_cpus):
+     # A bazel select() can only have one truthy condition so constraints such as:
+     #    ['windows', 'windows && x86_64']
+     # can not be expressed in a single select().
++    unconstrained, constrained = _partition_deps_by_platform(deps, deps_oss, deps_cpus)
++    return starlark_codegen_utils.to_conditional_dict_attr(
++        unconstrained,
++        [v for v in constrained.values() if len(v) > 0],
++        quote_key = False,
++        indent_count = 2,
++    )
++
++def _to_exec_deps_attr(deps, deps_oss, deps_cpus):
++    _unconstrained, constrained = _partition_deps_by_platform(deps, deps_oss, deps_cpus)
++    exec_deps = {}
++    for group in constrained.values():
++        for deps_for_condition in group.values():
++            exec_deps.update(deps_for_condition)
++    return starlark_codegen_utils.to_dict_attr(
++        exec_deps,
++        quote_key = False,
++        indent_count = 2,
++    )
++
++def _partition_deps_by_platform(deps, deps_oss, deps_cpus):
      unconstrained = {}
--    constrained = {
--        "os": {},
--        "cpu": {},
--        "both": {},
--    }
--
-     for k, v in deps.items():
--        if k in deps_oss and k in deps_cpus:
--            for condition in pnpm.to_bazel_os_cpu_constraints(deps_oss[k], deps_cpus[k]):
--                if condition not in constrained["both"]:
--                    constrained["both"][condition] = {}
--                constrained["both"][condition][k] = v
--        elif k in deps_oss:
--            for condition in pnpm.to_bazel_os_constraints(deps_oss[k]):
--                if condition not in constrained["os"]:
--                    constrained["os"][condition] = {}
--                constrained["os"][condition][k] = v
--        elif k in deps_cpus:
--            for condition in pnpm.to_bazel_cpu_constraints(deps_cpus[k]):
--                if condition not in constrained["cpu"]:
--                    constrained["cpu"][condition] = {}
--                constrained["cpu"][condition][k] = v
--        else:
--            unconstrained[k] = v
-+        unconstrained[k] = v
+     constrained = {
+         "os": {},
+@@ -930,12 +955,7 @@ def _to_deps_attr(deps, deps_oss, deps_cpus):
+         else:
+             unconstrained[k] = v
  
 -    return starlark_codegen_utils.to_conditional_dict_attr(
-+    return starlark_codegen_utils.to_dict_attr(
-         unconstrained,
+-        unconstrained,
 -        [v for v in constrained.values() if len(v) > 0],
 -        quote_key = False,
-         indent_count = 2,
-+        quote_key = False,
-     )
+-        indent_count = 2,
+-    )
++    return unconstrained, constrained
+ 
+ _COMMON_ATTRS = {
+     "package": attr.string(mandatory = True, doc = "Name of the npm package, such as `acorn` or `@types/node`"),
+diff --git a/npm/private/npm_package_store.bzl b/npm/private/npm_package_store.bzl
+index 4eb56e0..6df3bd0 100644
+--- a/npm/private/npm_package_store.bzl
++++ b/npm/private/npm_package_store.bzl
+@@ -113,6 +113,10 @@ _ATTRS = {
+         """,
+         providers = [NpmPackageStoreInfo, JsInfo],
+     ),
++    "exec_deps": attr.label_keyed_string_dict(
++        doc = """Other node package store link targets needed by JS tools that load target-configuration files.""",
++        providers = [NpmPackageStoreInfo, JsInfo],
++    ),
+     "exclude_package_contents": attr.string_list(
+         doc = """List of exclude patterns to exclude files from the package store.
+ 
+@@ -279,7 +284,7 @@ def _npm_package_store_impl(ctx):
+                 )
+ 
+         linked_package_store_directories = []
+-        for dep, _dep_aliases in ctx.attr.deps.items():
++        for dep, _dep_aliases in (ctx.attr.deps | ctx.attr.exec_deps).items():
+             dep_info = dep[NpmPackageStoreInfo]
+             dep_aliases = _dep_aliases.split(",") if _dep_aliases else [dep_info.package]
+             dep_package_store_directory = dep_info.package_store_directory
+@@ -338,7 +343,7 @@ deps of npm_package_store must be in the same package.""" % (ctx.label.package,
+         # deps; this pattern is used to break circular dependencies between 3rd party npm deps; it
+         # is not used for 1st party deps
+         deps_map = {}
+-        for dep, _dep_aliases in ctx.attr.deps.items():
++        for dep, _dep_aliases in (ctx.attr.deps | ctx.attr.exec_deps).items():
+             dep_info = dep[NpmPackageStoreInfo]
+ 
+             # create a map of deps that have package store directories
+@@ -351,7 +356,7 @@ deps of npm_package_store must be in the same package.""" % (ctx.label.package,
+                 dep_aliases = _dep_aliases.split(",") if _dep_aliases else [dep_info.package]
+                 direct_ref_deps[dep] = dep_aliases
+ 
+-        for dep in ctx.attr.deps:
++        for dep in (ctx.attr.deps | ctx.attr.exec_deps):
+             dep_info = dep[NpmPackageStoreInfo]
+             dep_package_store_name = utils.package_store_name(dep_info.key)
+ 
+@@ -381,7 +386,7 @@ deps of npm_package_store must be in the same package.""" % (ctx.label.package,
+         files.append(package_store_directory)
+ 
+     # Include the store and js info of all dependencies expected to be linked
+-    for target in ctx.attr.deps:
++    for target in (ctx.attr.deps | ctx.attr.exec_deps):
+         js_infos.append(target[JsInfo])
+         npm_package_store_infos.append(target[NpmPackageStoreInfo])
+ 
