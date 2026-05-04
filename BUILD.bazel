@@ -1,0 +1,26 @@
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+
+npm_link_all_packages()
+
+platform(
+    name = "linux_arm64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:arm64",
+    ],
+)
+
+js_binary(
+    name = "rolldown_tool",
+    data = [
+        "//:node_modules/rolldown",
+    ],
+    entry_point = "uses_rolldown.mjs",
+)
+
+js_run_binary(
+    name = "uses_rolldown",
+    stdout = "rolldown-output.txt",
+    tool = ":rolldown_tool",
+)

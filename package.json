@@ -1,0 +1,10 @@
+{
+  "name": "rules-js-exec-platform-repro",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "rolldown": "1.0.0-rc.16"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

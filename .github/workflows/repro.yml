@@ -1,0 +1,35 @@
+name: Repro
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rules-js-exec-platform-repro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install Bazelisk
+        run: npm install --global @bazel/bazelisk
+
+      - name: Verify lockfile
+        run: pnpm install --lockfile-only --frozen-lockfile
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Native target succeeds
+        run: bazelisk build //:uses_rolldown
+
+      - name: Cross target should fail because rules_js filters by target platform
+        run: bazelisk build //:uses_rolldown --platforms=//:linux_arm64
